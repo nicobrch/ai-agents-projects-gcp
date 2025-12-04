@@ -1,0 +1,135 @@
+# -----------------------------------------------------------------------------
+# Terraform Variables - Development Environment
+# -----------------------------------------------------------------------------
+# Copy this file to terraform.tfvars and customize the values.
+# DO NOT commit terraform.tfvars to version control (it may contain secrets).
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Project Configuration
+# -----------------------------------------------------------------------------
+
+project_id = "dev-ai-agents-projects"
+env_name   = "dev"
+region     = "us-central1"
+location   = "us"
+
+# -----------------------------------------------------------------------------
+# Labels
+# -----------------------------------------------------------------------------
+
+owner = "ai-platform-team"
+
+additional_labels = {
+  cost_center = "ai-research"
+}
+
+# -----------------------------------------------------------------------------
+# APIs
+# -----------------------------------------------------------------------------
+
+# Enable AI Platform APIs (Vertex AI, etc.)
+enable_ai_apis = false
+
+# Add any additional APIs needed
+enabled_apis = [
+  "run.googleapis.com",
+  "iam.googleapis.com",
+  "secretmanager.googleapis.com",
+  "cloudbuild.googleapis.com",
+  "artifactregistry.googleapis.com",
+  "cloudresourcemanager.googleapis.com",
+  "logging.googleapis.com",
+  "monitoring.googleapis.com",
+]
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+# Define environment-level secrets here.
+# For dev, you can include initial_value for testing.
+# For prod, leave initial_value empty and populate manually.
+
+secrets = {
+  # Example: OpenAI API key for AI services
+  # "openai-api-key" = {
+  #   replication   = "auto"
+  #   initial_value = "sk-dev-your-openai-key-here"
+  #   labels        = { service = "ai-agents" }
+  # }
+
+  # Example: Database connection string
+  # "db-connection-string" = {
+  #   replication = "auto"
+  #   labels      = { service = "shared" }
+  # }
+}
+
+create_secret_versions = true
+
+# -----------------------------------------------------------------------------
+# IAM
+# -----------------------------------------------------------------------------
+# Environment-level service accounts and bindings.
+# Feature-specific IAM is handled by feature modules.
+
+service_accounts = {
+  # Add shared service accounts here if needed
+  # "shared-sa" = {
+  #   display_name = "Shared Service Account"
+  #   description  = "Shared SA for multiple services"
+  # }
+}
+
+iam_bindings = {
+  # Add environment-level IAM bindings here
+  # "roles/storage.objectViewer" = [
+  #   "serviceAccount:shared-sa@dev-ai-agents-projects.iam.gserviceaccount.com"
+  # ]
+}
+
+# -----------------------------------------------------------------------------
+# AI Agents API Configuration
+# -----------------------------------------------------------------------------
+
+ai_agents_api_enabled = true
+
+# Container image - update this with your actual image
+ai_agents_api_image = "us-docker.pkg.dev/cloudrun/container/hello:latest"
+
+# Scaling - conservative for dev
+ai_agents_api_min_instances = 0
+ai_agents_api_max_instances = 5
+
+# Resources - smaller for dev
+ai_agents_api_cpu    = "1"
+ai_agents_api_memory = "512Mi"
+
+ai_agents_api_concurrency = 80
+
+# Environment variables
+ai_agents_api_env_vars = {
+  LOG_LEVEL = "debug"
+  # Add more env vars as needed
+}
+
+# Authentication
+# Set to true for public webhook endpoints, false for internal services
+ai_agents_api_allow_unauthenticated = false
+
+# List of service accounts/users that can invoke the API
+ai_agents_api_invokers = [
+  # "serviceAccount:another-service@dev-ai-agents-projects.iam.gserviceaccount.com",
+  # "user:developer@example.com",
+]
+
+# -----------------------------------------------------------------------------
+# ADD CONFIGURATION FOR NEW FEATURES HERE
+# -----------------------------------------------------------------------------
+# Example:
+#
+# my_new_feature_enabled       = true
+# my_new_feature_image         = "us-docker.pkg.dev/project/repo/image:tag"
+# my_new_feature_min_instances = 0
+# my_new_feature_max_instances = 5
+# -----------------------------------------------------------------------------

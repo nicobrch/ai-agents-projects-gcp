@@ -1,0 +1,116 @@
+# -----------------------------------------------------------------------------
+# Terraform Variables - Production Environment
+# -----------------------------------------------------------------------------
+# Copy this file to terraform.tfvars and customize the values.
+# DO NOT commit terraform.tfvars to version control (it may contain secrets).
+#
+# IMPORTANT: Production configuration should be reviewed by the team.
+# Consider using environment variables or a secrets manager for sensitive values.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Project Configuration
+# -----------------------------------------------------------------------------
+
+project_id = "prod-ai-agents-projects"
+env_name   = "prod"
+region     = "us-central1"
+location   = "us"
+
+# -----------------------------------------------------------------------------
+# Labels
+# -----------------------------------------------------------------------------
+
+owner = "ai-platform-team"
+
+additional_labels = {
+  cost_center = "ai-production"
+}
+
+# -----------------------------------------------------------------------------
+# APIs
+# -----------------------------------------------------------------------------
+
+# Enable AI Platform APIs (Vertex AI, etc.)
+enable_ai_apis = false
+
+# Add any additional APIs needed
+enabled_apis = [
+  "run.googleapis.com",
+  "iam.googleapis.com",
+  "secretmanager.googleapis.com",
+  "cloudbuild.googleapis.com",
+  "artifactregistry.googleapis.com",
+  "cloudresourcemanager.googleapis.com",
+  "logging.googleapis.com",
+  "monitoring.googleapis.com",
+]
+
+# -----------------------------------------------------------------------------
+# Secrets
+# -----------------------------------------------------------------------------
+# For production, create secrets without initial_value.
+# Populate secret values manually or via secure CI/CD pipeline.
+
+secrets = {
+  # Example: OpenAI API key for AI services
+  # "openai-api-key" = {
+  #   replication = "auto"
+  #   labels      = { service = "ai-agents" }
+  #   # NO initial_value for production!
+  # }
+}
+
+# IMPORTANT: Set to false in production
+# Secret values should be populated manually or via secure CI/CD
+create_secret_versions = false
+
+# -----------------------------------------------------------------------------
+# IAM
+# -----------------------------------------------------------------------------
+# Environment-level service accounts and bindings.
+# Feature-specific IAM is handled by feature modules.
+
+service_accounts = {
+  # Add shared service accounts here if needed
+}
+
+iam_bindings = {
+  # Add environment-level IAM bindings here
+}
+
+# -----------------------------------------------------------------------------
+# AI Agents API Configuration
+# -----------------------------------------------------------------------------
+
+ai_agents_api_enabled = true
+
+# Container image - use a specific version tag for production (not :latest)
+ai_agents_api_image = "us-docker.pkg.dev/cloudrun/container/hello:latest"  # Replace with actual versioned image
+
+# Scaling - production settings for high availability
+ai_agents_api_min_instances = 1   # Always keep at least one instance warm
+ai_agents_api_max_instances = 100
+
+# Resources - production-appropriate
+ai_agents_api_cpu    = "2"
+ai_agents_api_memory = "1Gi"
+
+ai_agents_api_concurrency = 100
+
+# Environment variables
+ai_agents_api_env_vars = {
+  LOG_LEVEL = "info"
+}
+
+# Authentication - typically restricted in production
+ai_agents_api_allow_unauthenticated = false
+
+# List of service accounts that can invoke the API
+ai_agents_api_invokers = [
+  # "serviceAccount:frontend-sa@prod-ai-agents-projects.iam.gserviceaccount.com",
+]
+
+# -----------------------------------------------------------------------------
+# ADD CONFIGURATION FOR NEW FEATURES HERE
+# -----------------------------------------------------------------------------
