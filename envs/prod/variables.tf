@@ -11,6 +11,11 @@ variable "project_id" {
   type        = string
 }
 
+variable "project_number" {
+  description = "GCP project number (numeric) for Workload Identity Federation"
+  type        = string
+}
+
 variable "env_name" {
   description = "Environment name (e.g., 'dev', 'prod')"
   type        = string
@@ -27,6 +32,16 @@ variable "location" {
   description = "Default GCP location (for multi-regional resources)"
   type        = string
   default     = "us"
+}
+
+# -----------------------------------------------------------------------------
+# Workload Identity Federation
+# -----------------------------------------------------------------------------
+
+variable "workload_identity_pool_id" {
+  description = "Workload Identity Pool ID for GitHub Actions authentication"
+  type        = string
+  default     = "github-pool"
 }
 
 # -----------------------------------------------------------------------------
@@ -146,67 +161,91 @@ variable "iam_bindings" {
 }
 
 # -----------------------------------------------------------------------------
-# AI Agents API Feature Configuration
+# Luca API Feature Configuration
 # -----------------------------------------------------------------------------
 
-variable "ai_agents_api_enabled" {
-  description = "Whether to deploy the AI Agents API service"
+variable "luca_enabled" {
+  description = "Whether to deploy the Luca API service"
   type        = bool
   default     = true
 }
 
-variable "ai_agents_api_image" {
-  description = "Container image for the AI Agents API service"
+variable "luca_image" {
+  description = "Container image for the Luca API service"
   type        = string
   default     = "us-docker.pkg.dev/cloudrun/container/hello:latest" # Placeholder
 }
 
-variable "ai_agents_api_min_instances" {
-  description = "Minimum instances for AI Agents API (higher for prod)"
+variable "luca_min_instances" {
+  description = "Minimum instances for Luca API (higher for prod)"
   type        = number
   default     = 1
 }
 
-variable "ai_agents_api_max_instances" {
-  description = "Maximum instances for AI Agents API"
+variable "luca_max_instances" {
+  description = "Maximum instances for Luca API"
   type        = number
   default     = 100
 }
 
-variable "ai_agents_api_cpu" {
-  description = "CPU limit for AI Agents API"
+variable "luca_cpu" {
+  description = "CPU limit for Luca API"
   type        = string
   default     = "2"
 }
 
-variable "ai_agents_api_memory" {
-  description = "Memory limit for AI Agents API"
+variable "luca_memory" {
+  description = "Memory limit for Luca API"
   type        = string
   default     = "1Gi"
 }
 
-variable "ai_agents_api_concurrency" {
-  description = "Max concurrent requests per instance for AI Agents API"
+variable "luca_concurrency" {
+  description = "Max concurrent requests per instance for Luca API"
   type        = number
   default     = 100
 }
 
-variable "ai_agents_api_env_vars" {
-  description = "Environment variables for AI Agents API"
+variable "luca_env_vars" {
+  description = "Environment variables for Luca API"
   type        = map(string)
   default = {
     LOG_LEVEL = "info"
   }
 }
 
-variable "ai_agents_api_allow_unauthenticated" {
-  description = "Allow unauthenticated access to AI Agents API"
+variable "luca_secrets" {
+  description = <<-EOT
+    Secrets to inject into Luca Cloud Run service.
+    Example:
+    {
+      "GOOGLE_API_KEY" = {
+        secret_name = "projects/PROJECT/secrets/google-api-key"
+        version     = "latest"
+      }
+    }
+  EOT
+  type = map(object({
+    secret_name = string
+    version     = optional(string, "latest")
+  }))
+  default = {}
+}
+
+variable "luca_allow_unauthenticated" {
+  description = "Allow unauthenticated access to Luca API"
   type        = bool
   default     = false
 }
 
-variable "ai_agents_api_invokers" {
-  description = "List of members who can invoke the AI Agents API"
+variable "luca_invokers" {
+  description = "List of members who can invoke the Luca API"
   type        = list(string)
   default     = []
+}
+
+variable "luca_github_repo" {
+  description = "GitHub repository for Luca (owner/repo format) for Workload Identity Federation"
+  type        = string
+  default     = ""
 }

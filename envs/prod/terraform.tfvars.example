@@ -12,10 +12,14 @@
 # Project Configuration
 # -----------------------------------------------------------------------------
 
-project_id = "prod-ai-agents-projects"
-env_name   = "prod"
-region     = "us-central1"
-location   = "us"
+project_id     = "prod-ai-agents-projects"
+project_number = "YOUR_PROJECT_NUMBER" # Get from `gcloud projects describe prod-ai-agents-projects --format='value(projectNumber)'`
+env_name       = "prod"
+region         = "us-central1"
+location       = "us"
+
+# Workload Identity Federation (for GitHub Actions authentication)
+workload_identity_pool_id = "github-pool"
 
 # -----------------------------------------------------------------------------
 # Labels
@@ -53,10 +57,10 @@ enabled_apis = [
 # Populate secret values manually or via secure CI/CD pipeline.
 
 secrets = {
-  # Example: OpenAI API key for AI services
-  # "openai-api-key" = {
+  # Example: Google API key for Luca
+  # "google-api-key" = {
   #   replication = "auto"
-  #   labels      = { service = "ai-agents" }
+  #   labels      = { service = "luca" }
   #   # NO initial_value for production!
   # }
 }
@@ -80,36 +84,50 @@ iam_bindings = {
 }
 
 # -----------------------------------------------------------------------------
-# AI Agents API Configuration
+# Luca API Configuration
 # -----------------------------------------------------------------------------
 
-ai_agents_api_enabled = true
+luca_enabled = true
 
 # Container image - use a specific version tag for production (not :latest)
-ai_agents_api_image = "us-docker.pkg.dev/cloudrun/container/hello:latest"  # Replace with actual versioned image
+# Format: REGION-docker.pkg.dev/PROJECT/REPO/IMAGE:TAG
+luca_image = "us-central1-docker.pkg.dev/prod-ai-agents-projects/luca/luca-api:latest"
 
 # Scaling - production settings for high availability
-ai_agents_api_min_instances = 1   # Always keep at least one instance warm
-ai_agents_api_max_instances = 100
+luca_min_instances = 1   # Always keep at least one instance warm
+luca_max_instances = 100
 
 # Resources - production-appropriate
-ai_agents_api_cpu    = "2"
-ai_agents_api_memory = "1Gi"
+luca_cpu    = "2"
+luca_memory = "1Gi"
 
-ai_agents_api_concurrency = 100
+luca_concurrency = 100
 
 # Environment variables
-ai_agents_api_env_vars = {
+luca_env_vars = {
   LOG_LEVEL = "info"
 }
 
+# Secrets from Secret Manager
+# Configure when you have secrets set up:
+# luca_secrets = {
+#   "GOOGLE_API_KEY" = {
+#     secret_name = "projects/prod-ai-agents-projects/secrets/google-api-key"
+#     version     = "latest"
+#   }
+# }
+
 # Authentication - typically restricted in production
-ai_agents_api_allow_unauthenticated = false
+luca_allow_unauthenticated = false
 
 # List of service accounts that can invoke the API
-ai_agents_api_invokers = [
+luca_invokers = [
   # "serviceAccount:frontend-sa@prod-ai-agents-projects.iam.gserviceaccount.com",
 ]
+
+# GitHub repository for Workload Identity Federation (owner/repo format)
+# This allows GitHub Actions to authenticate without JSON keys
+luca_github_repo = "nicobrch/luca"
 
 # -----------------------------------------------------------------------------
 # ADD CONFIGURATION FOR NEW FEATURES HERE

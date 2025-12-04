@@ -54,31 +54,44 @@ output "service_account_emails" {
 }
 
 # -----------------------------------------------------------------------------
-# AI Agents API
+# Luca API
 # -----------------------------------------------------------------------------
 
-output "ai_agents_api_url" {
-  description = "URL of the AI Agents API Cloud Run service"
-  value       = var.ai_agents_api_enabled ? module.ai_agents_api[0].service_url : null
+output "luca_api_url" {
+  description = "URL of the Luca API Cloud Run service"
+  value       = var.luca_enabled ? module.luca_api[0].service_url : null
 }
 
-output "ai_agents_api_service_name" {
-  description = "Name of the AI Agents API Cloud Run service"
-  value       = var.ai_agents_api_enabled ? module.ai_agents_api[0].service_name : null
+output "luca_api_service_name" {
+  description = "Name of the Luca API Cloud Run service"
+  value       = var.luca_enabled ? module.luca_api[0].service_name : null
 }
 
-output "ai_agents_api_service_account" {
-  description = "Service account email used by AI Agents API"
-  value       = var.ai_agents_api_enabled ? module.ai_agents_api[0].service_account_email : null
+output "luca_cloudrun_service_account" {
+  description = "Service account email used by Luca API Cloud Run"
+  value       = var.luca_enabled ? module.luca_api[0].service_account_email : null
+}
+
+output "luca_github_ci_service_account" {
+  description = "Service account email for GitHub Actions CI/CD"
+  value       = var.luca_enabled ? google_service_account.luca_github_ci[0].email : null
+}
+
+output "luca_artifact_registry_repo" {
+  description = "Artifact Registry repository name for Luca container images"
+  value       = var.luca_enabled ? google_artifact_registry_repository.luca[0].name : null
+}
+
+output "luca_artifact_registry_path" {
+  description = "Full path to push Docker images (REGION-docker.pkg.dev/PROJECT/REPO)"
+  value       = var.luca_enabled ? "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.luca[0].name}" : null
+}
+
+output "luca_workload_identity_provider" {
+  description = "Workload Identity Provider for GitHub Actions (use as GCP_WORKLOAD_IDENTITY_PROVIDER_DEV secret)"
+  value       = var.luca_enabled && var.luca_github_repo != "" ? "projects/${var.project_number}/locations/global/workloadIdentityPools/${var.workload_identity_pool_id}/providers/github-provider" : null
 }
 
 # -----------------------------------------------------------------------------
 # ADD OUTPUTS FOR NEW FEATURES HERE
-# -----------------------------------------------------------------------------
-# Example:
-#
-# output "my_new_feature_url" {
-#   description = "URL of My New Feature service"
-#   value       = var.my_new_feature_enabled ? module.my_new_feature[0].service_url : null
-# }
 # -----------------------------------------------------------------------------

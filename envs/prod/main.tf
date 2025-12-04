@@ -33,9 +33,6 @@ locals {
 
   # APIs to enable (conditionally include AI APIs)
   all_apis = var.enable_ai_apis ? concat(var.enabled_apis, var.ai_apis) : var.enabled_apis
-
-  # Service account email for AI Agents API
-  ai_agents_api_sa_email = "ai-agents-api-sa@${var.project_id}.iam.gserviceaccount.com"
 }
 
 # -----------------------------------------------------------------------------
@@ -90,57 +87,72 @@ module "iam" {
 }
 
 # -----------------------------------------------------------------------------
-# AI Agents API Feature
+# Artifact Registry for Luca Container Images
 # -----------------------------------------------------------------------------
-# Production deployment of the AI Agents API.
+# Docker repository for storing Luca API container images.
+# -----------------------------------------------------------------------------
+
+resource "google_artifact_registry_repository" "luca" {
+  count = var.luca_enabled ? 1 : 0
+
+  location      = var.region
+  repository_id = "luca"
+  description   = "Docker repository for Luca API container images"
+  format        = "DOCKER"
+  project       = var.project_id
+
+  labels = local.common_labels
+
+  depends_on = [module.project_apis]
+}
+
+# -----------------------------------------------------------------------------
+# Luca API Feature
+# -----------------------------------------------------------------------------
+# Production deployment of Luca - an AI assistant powered by Google ADK and Gemini.
 # Configured for higher availability and performance.
 # -----------------------------------------------------------------------------
 
-module "ai_agents_api" {
+module "luca_api" {
   source = "../../modules/ai_feature_example"
 
-  count = var.ai_agents_api_enabled ? 1 : 0
+  count = var.luca_enabled ? 1 : 0
 
   # Feature identification
-  feature_name = "ai-agents-api"
-  service_name = "ai-agents-api-${local.env_name}"
+  feature_name = "luca-api"
+  service_name = "luca-api-${local.env_name}"
 
   # GCP configuration
   project_id = var.project_id
   region     = var.region
 
   # Container configuration
-  container_image = var.ai_agents_api_image
+  container_image = var.luca_image
 
   # Service account
   create_service_account = true
-  service_account_id     = "ai-agents-api-sa"
+  service_account_id     = "luca-cloudrun-sa"
 
   # Scaling configuration (higher for production)
-  min_instances = var.ai_agents_api_min_instances
-  max_instances = var.ai_agents_api_max_instances
-  concurrency   = var.ai_agents_api_concurrency
+  min_instances = var.luca_min_instances
+  max_instances = var.luca_max_instances
+  concurrency   = var.luca_concurrency
 
   # Resource limits (higher for production)
-  cpu_limit    = var.ai_agents_api_cpu
-  memory_limit = var.ai_agents_api_memory
+  cpu_limit    = var.luca_cpu
+  memory_limit = var.luca_memory
 
   # Environment variables
-  env_vars = merge(var.ai_agents_api_env_vars, {
+  env_vars = merge(var.luca_env_vars, {
     ENV = local.env_name
   })
 
-  # Secrets (reference secrets created by the secrets module or elsewhere)
-  # Uncomment and modify when you have actual secrets:
-  # cloud_run_secrets = {
-  #   "OPENAI_API_KEY" = {
-  #     secret_name = module.secrets.secret_names["openai-api-key"]
-  #   }
-  # }
+  # Secrets from Secret Manager
+  cloud_run_secrets = var.luca_secrets
 
   # Authentication (typically more restrictive in prod)
-  allow_unauthenticated = var.ai_agents_api_allow_unauthenticated
-  invokers              = var.ai_agents_api_invokers
+  allow_unauthenticated = var.luca_allow_unauthenticated
+  invokers              = var.luca_invokers
 
   # Labels
   labels = local.common_labels
@@ -166,14 +178,71 @@ module "ai_agents_api" {
   depends_on = [
     module.project_apis,
     module.secrets,
-    module.iam
+    module.iam,
+    google_artifact_registry_repository.luca
   ]
+}
+
+# -----------------------------------------------------------------------------
+# GitHub CI/CD Service Account for Luca
+# -----------------------------------------------------------------------------
+# Dedicated service account for GitHub Actions to push images to Artifact
+# Registry and deploy to Cloud Run.
+# -----------------------------------------------------------------------------
+
+resource "google_service_account" "luca_github_ci" {
+  count = var.luca_enabled ? 1 : 0
+
+  project      = var.project_id
+  account_id   = "luca-github-ci-sa"
+  display_name = "Luca GitHub CI/CD Service Account"
+  description  = "Service account for GitHub Actions to build and deploy Luca"
+}
+
+# Grant CI/CD SA permission to push to Artifact Registry
+resource "google_artifact_registry_repository_iam_member" "luca_github_ci_writer" {
+  count = var.luca_enabled ? 1 : 0
+
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.luca[0].name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.luca_github_ci[0].email}"
+}
+
+# Grant CI/CD SA permission to deploy Cloud Run services
+resource "google_project_iam_member" "luca_github_ci_run_admin" {
+  count = var.luca_enabled ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/run.admin"
+  member  = "serviceAccount:${google_service_account.luca_github_ci[0].email}"
+}
+
+# Grant CI/CD SA permission to act as the Cloud Run service account
+resource "google_service_account_iam_member" "luca_github_ci_sa_user" {
+  count = var.luca_enabled ? 1 : 0
+
+  service_account_id = "projects/${var.project_id}/serviceAccounts/luca-cloudrun-sa@${var.project_id}.iam.gserviceaccount.com"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.luca_github_ci[0].email}"
+
+  depends_on = [module.luca_api]
+}
+
+# Allow GitHub Actions to impersonate the Luca CI/CD service account via Workload Identity Federation
+resource "google_service_account_iam_member" "luca_github_ci_wif" {
+  count = var.luca_enabled && var.luca_github_repo != "" ? 1 : 0
+
+  service_account_id = google_service_account.luca_github_ci[0].name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/projects/${var.project_number}/locations/global/workloadIdentityPools/${var.workload_identity_pool_id}/attribute.repository/${var.luca_github_repo}"
 }
 
 # -----------------------------------------------------------------------------
 # ADD NEW FEATURES HERE
 # -----------------------------------------------------------------------------
-# Copy the ai_agents_api module block above and modify for your new feature.
+# Copy the luca_api module block above and modify for your new feature.
 # Remember to configure production-appropriate settings:
 # - Higher min_instances for availability
 # - Appropriate max_instances for cost/performance balance
