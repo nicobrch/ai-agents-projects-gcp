@@ -74,6 +74,12 @@ env:
   TF_VAR_project_id: "prod-ai-agents-projects"
   TF_VAR_region: "us-central1"
   TF_VAR_environment: "prod"
+  # Workload Identity Federation variables
+  # TODO: Set PROD_GCP_PROJECT_NUMBER secret in GitHub with your project number
+  # Get it with: gcloud projects describe prod-ai-agents-projects --format='value(projectNumber)'
+  TF_VAR_project_number: ${{ secrets.PROD_GCP_PROJECT_NUMBER }}
+  TF_VAR_workload_identity_pool_id: "github-pool"
+  TF_VAR_luca_github_repo: "nicobrch/luca"
   # Terraform version - pin for reproducibility
   TF_VERSION: "1.6.0"
   # Working directory for this environment
@@ -180,7 +186,8 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color -input=false -out=tfplan -detailed-exitcode || echo "exitcode=$?" >> $GITHUB_OUTPUT
+          terraform plan -no-color -input=false -out=tfplan -detailed-exitcode
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
         continue-on-error: true
 
       # ========================================================================
@@ -188,15 +195,15 @@ jobs:
       # ========================================================================
       # Save the plan file for the apply job to use.
       # This ensures the exact same plan is applied.
-      # Note: We only upload the plan file, not .terraform directory.
-      # The apply job will run terraform init to restore providers.
+      # Note: Only upload if plan succeeded (exitcode 0 or 2 for changes)
       - name: Upload Plan
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && (steps.plan.outcome == 'success' || steps.plan.outputs.exitcode == '2')
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-prod
           path: ${{ env.WORKING_DIR }}/tfplan
           retention-days: 5
+          if-no-files-found: error
 
       # ========================================================================
       # Post Plan to PR (Optional - helpful for code review)
@@ -266,8 +273,8 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
 
-    # Only run on push to main (not PRs)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Only run on push to main (not PRs) and if plan was successful
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.plan.result == 'success'
 
     # =========================================================================
     # GitHub Environment Protection
