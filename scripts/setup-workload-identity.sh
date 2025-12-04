@@ -173,8 +173,7 @@ echo ""
 # ============================================================================
 echo -e "${YELLOW}[Step 5/6]${NC} Granting IAM roles to Service Account..."
 
-# Grant Editor role (adjust as needed for your security requirements)
-# Consider using more restrictive roles in production
+# Grant Editor role for general resource management
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
     --role="roles/editor" \
@@ -182,6 +181,16 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --quiet
 
 echo -e "${GREEN}✓ Editor role granted${NC}"
+
+# Grant Project IAM Admin role for managing IAM policies
+# Required for Terraform to assign roles to service accounts
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+    --role="roles/resourcemanager.projectIamAdmin" \
+    --condition=None \
+    --quiet
+
+echo -e "${GREEN}✓ Project IAM Admin role granted${NC}"
 echo ""
 
 # ============================================================================
