@@ -1,0 +1,355 @@
+# ============================================================================
+# Terraform CI/CD Workflow - PROD Environment
+# ============================================================================
+# This workflow runs Terraform against the prod environment (envs/prod/).
+#
+# Triggers:
+#   - Push to 'main' branch: runs full pipeline with protected apply
+#   - Pull request to 'main' branch: runs plan only (no apply)
+#
+# Safety Features:
+#   - Uses GitHub Environment 'production' with required reviewers
+#   - Plan output is saved as artifact for review before apply
+#   - Apply requires manual approval through GitHub Environments
+#
+# Authentication:
+#   Uses Workload Identity Federation (recommended) via google-github-actions/auth.
+#   Required GitHub Secrets (environment-specific):
+#     - PROD_GCP_WORKLOAD_IDENTITY_PROVIDER: projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>/providers/<PROVIDER_ID>
+#     - PROD_GCP_SERVICE_ACCOUNT_EMAIL: <SERVICE_ACCOUNT>@<PROJECT_ID>.iam.gserviceaccount.com
+#
+#   Alternative (Service Account Key):
+#     If using a JSON key instead, set PROD_GCP_SA_KEY secret and uncomment the
+#     alternative auth section below.
+#
+# GitHub Environment Setup:
+#   1. Go to Repository Settings > Environments
+#   2. Create environment named 'production'
+#   3. Add required reviewers (recommended: at least 1)
+#   4. Optionally add deployment branch rules (only 'main')
+#
+# To add a new environment (e.g., staging):
+#   1. Copy this file to terraform-staging.yml
+#   2. Update branch triggers
+#   3. Update working-directory
+#   4. Update TF_VAR_* environment variables
+#   5. Update GitHub Environment name
+# ============================================================================
+
+name: "Terraform - Prod"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Only trigger on changes to Terraform files
+      - "envs/prod/**"
+      - "modules/**"
+      - ".github/workflows/terraform-prod.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "envs/prod/**"
+      - "modules/**"
+      - ".github/workflows/terraform-prod.yml"
+  # Allow manual trigger for debugging/re-runs
+  workflow_dispatch:
+
+# Ensure only one workflow runs at a time per branch to prevent conflicts
+concurrency:
+  group: terraform-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+# Set Terraform and GCP-related variables here.
+# Easy to extend: just add more TF_VAR_* variables as needed.
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # Project-specific variables (passed to Terraform via TF_VAR_*)
+  TF_VAR_project_id: "prod-ai-agents-projects"
+  TF_VAR_region: "us-central1"
+  TF_VAR_environment: "prod"
+  # Terraform version - pin for reproducibility
+  TF_VERSION: "1.6.0"
+  # Working directory for this environment
+  WORKING_DIR: "./envs/prod"
+
+jobs:
+  # ============================================================================
+  # Terraform Plan Job
+  # ============================================================================
+  # Runs fmt, init, validate, and plan.
+  # Uploads plan as artifact for the apply job.
+  plan:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+
+    # Required for Workload Identity Federation
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write  # To post plan comments on PRs
+
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    outputs:
+      plan_exitcode: ${{ steps.plan.outputs.exitcode }}
+
+    steps:
+      # ========================================================================
+      # Checkout Repository
+      # ========================================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ========================================================================
+      # Authenticate to GCP
+      # ========================================================================
+      # Option 1: Workload Identity Federation (Recommended)
+      # This is the most secure method - no long-lived credentials stored.
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.PROD_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.PROD_GCP_SERVICE_ACCOUNT_EMAIL }}
+          # token_format: access_token  # Uncomment if you need an access token
+
+      # Option 2: Service Account Key (Alternative)
+      # Uncomment the block below and comment out the Workload Identity block above
+      # if you prefer using a JSON key stored as a secret.
+      # - name: Authenticate to Google Cloud (SA Key)
+      #   env:
+      #     GOOGLE_CREDENTIALS: ${{ secrets.PROD_GCP_SA_KEY }}
+      #   run: echo "Using service account key authentication"
+
+      # ========================================================================
+      # Setup Terraform
+      # ========================================================================
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: true
+
+      # ========================================================================
+      # Cache Terraform Providers (Optional - improves performance)
+      # ========================================================================
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORKING_DIR }}/.terraform
+            ~/.terraform.d/plugin-cache
+          key: terraform-prod-${{ hashFiles('envs/prod/.terraform.lock.hcl', 'envs/prod/*.tf') }}
+          restore-keys: |
+            terraform-prod-
+
+      # ========================================================================
+      # Terraform Format Check
+      # ========================================================================
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -recursive -diff
+        continue-on-error: true
+
+      # ========================================================================
+      # Terraform Init
+      # ========================================================================
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+
+      # ========================================================================
+      # Terraform Validate
+      # ========================================================================
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # ========================================================================
+      # Terraform Plan
+      # ========================================================================
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false -out=tfplan -detailed-exitcode || echo "exitcode=$?" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      # ========================================================================
+      # Upload Plan Artifact
+      # ========================================================================
+      # Save the plan file for the apply job to use.
+      # This ensures the exact same plan is applied.
+      - name: Upload Plan
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: ${{ env.WORKING_DIR }}/tfplan
+          retention-days: 5
+
+      # Also upload the .terraform directory for apply job
+      - name: Upload Terraform Directory
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-dir-prod
+          path: ${{ env.WORKING_DIR }}/.terraform
+          retention-days: 5
+
+      # ========================================================================
+      # Post Plan to PR (Optional - helpful for code review)
+      # ========================================================================
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### 🚀 Production Terraform Plan
+
+            #### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            ⚠️ **This is a PRODUCTION plan. Please review carefully before merging.**
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      # ========================================================================
+      # Check Plan Status
+      # ========================================================================
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      # ========================================================================
+      # Summary
+      # ========================================================================
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Terraform Prod Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Format | ${{ steps.fmt.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Init | ${{ steps.init.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ steps.validate.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plan | ${{ steps.plan.outcome }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Terraform Apply Job
+  # ============================================================================
+  # Applies the plan from the previous job.
+  # Protected by GitHub Environment with required reviewers.
+  apply:
+    name: "Terraform Apply"
+    needs: plan
+    runs-on: ubuntu-latest
+
+    # Only run on push to main (not PRs)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    # =========================================================================
+    # GitHub Environment Protection
+    # =========================================================================
+    # This enables manual approval before apply.
+    # Configure required reviewers in Repository Settings > Environments.
+    environment:
+      name: production
+      url: https://console.cloud.google.com/home/dashboard?project=prod-ai-agents-projects
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      # ========================================================================
+      # Checkout Repository
+      # ========================================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ========================================================================
+      # Authenticate to GCP
+      # ========================================================================
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.PROD_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.PROD_GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      # ========================================================================
+      # Setup Terraform
+      # ========================================================================
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: true
+
+      # ========================================================================
+      # Download Artifacts
+      # ========================================================================
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod
+          path: ${{ env.WORKING_DIR }}
+
+      - name: Download Terraform Directory
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-dir-prod
+          path: ${{ env.WORKING_DIR }}/.terraform
+
+      # ========================================================================
+      # Terraform Apply
+      # ========================================================================
+      # Apply the exact plan that was reviewed and approved.
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false tfplan
+
+      # ========================================================================
+      # Summary
+      # ========================================================================
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Terraform Prod Apply Summary" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Production infrastructure has been updated." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Project:** prod-ai-agents-projects" >> $GITHUB_STEP_SUMMARY
+          echo "**Applied by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

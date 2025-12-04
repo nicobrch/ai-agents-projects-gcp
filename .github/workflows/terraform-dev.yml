@@ -1,0 +1,230 @@
+# ============================================================================
+# Terraform CI/CD Workflow - DEV Environment
+# ============================================================================
+# This workflow runs Terraform against the dev environment (envs/dev/).
+#
+# Triggers:
+#   - Push to 'dev' branch: runs full pipeline including apply
+#   - Pull request to 'dev' branch: runs plan only (no apply)
+#
+# Authentication:
+#   Uses Workload Identity Federation (recommended) via google-github-actions/auth.
+#   Required GitHub Secrets (environment-specific):
+#     - DEV_GCP_WORKLOAD_IDENTITY_PROVIDER: projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>/providers/<PROVIDER_ID>
+#     - DEV_GCP_SERVICE_ACCOUNT_EMAIL: <SERVICE_ACCOUNT>@<PROJECT_ID>.iam.gserviceaccount.com
+#
+#   Alternative (Service Account Key):
+#     If using a JSON key instead, set DEV_GCP_SA_KEY secret and uncomment the
+#     alternative auth section below.
+#
+# To add a new environment (e.g., staging):
+#   1. Copy this file to terraform-staging.yml
+#   2. Update branch triggers (dev -> staging)
+#   3. Update working-directory (envs/dev -> envs/staging)
+#   4. Update TF_VAR_* environment variables
+# ============================================================================
+
+name: "Terraform - Dev"
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      # Only trigger on changes to Terraform files
+      - "envs/dev/**"
+      - "modules/**"
+      - ".github/workflows/terraform-dev.yml"
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - "envs/dev/**"
+      - "modules/**"
+      - ".github/workflows/terraform-dev.yml"
+  # Allow manual trigger for debugging/re-runs
+  workflow_dispatch:
+
+# Ensure only one workflow runs at a time per branch to prevent conflicts
+concurrency:
+  group: terraform-dev-${{ github.ref }}
+  cancel-in-progress: false
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+# Set Terraform and GCP-related variables here.
+# Easy to extend: just add more TF_VAR_* variables as needed.
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  # Project-specific variables (passed to Terraform via TF_VAR_*)
+  TF_VAR_project_id: "dev-ai-agents-projects"
+  TF_VAR_region: "us-central1"
+  TF_VAR_environment: "dev"
+  # Terraform version - pin for reproducibility
+  TF_VERSION: "1.6.0"
+  # Working directory for this environment
+  WORKING_DIR: "./envs/dev"
+
+jobs:
+  # ============================================================================
+  # Terraform Job
+  # ============================================================================
+  # Runs fmt, init, validate, plan, and conditionally apply.
+  terraform:
+    name: "Terraform Dev"
+    runs-on: ubuntu-latest
+
+    # Required for Workload Identity Federation
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write  # To post plan comments on PRs (optional)
+
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      # ========================================================================
+      # Checkout Repository
+      # ========================================================================
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ========================================================================
+      # Authenticate to GCP
+      # ========================================================================
+      # Option 1: Workload Identity Federation (Recommended)
+      # This is the most secure method - no long-lived credentials stored.
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.DEV_GCP_SERVICE_ACCOUNT_EMAIL }}
+          # token_format: access_token  # Uncomment if you need an access token
+
+      # Option 2: Service Account Key (Alternative)
+      # Uncomment the block below and comment out the Workload Identity block above
+      # if you prefer using a JSON key stored as a secret.
+      # - name: Authenticate to Google Cloud (SA Key)
+      #   env:
+      #     GOOGLE_CREDENTIALS: ${{ secrets.DEV_GCP_SA_KEY }}
+      #   run: echo "Using service account key authentication"
+
+      # ========================================================================
+      # Setup Terraform
+      # ========================================================================
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: true  # Enables output in GitHub Actions
+
+      # ========================================================================
+      # Cache Terraform Providers (Optional - improves performance)
+      # ========================================================================
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORKING_DIR }}/.terraform
+            ~/.terraform.d/plugin-cache
+          key: terraform-dev-${{ hashFiles('envs/dev/.terraform.lock.hcl', 'envs/dev/*.tf') }}
+          restore-keys: |
+            terraform-dev-
+
+      # ========================================================================
+      # Terraform Format Check
+      # ========================================================================
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -recursive -diff
+        continue-on-error: true
+
+      # ========================================================================
+      # Terraform Init
+      # ========================================================================
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+
+      # ========================================================================
+      # Terraform Validate
+      # ========================================================================
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      # ========================================================================
+      # Terraform Plan
+      # ========================================================================
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -input=false -out=tfplan
+        continue-on-error: true
+
+      # ========================================================================
+      # Post Plan to PR (Optional - helpful for code review)
+      # ========================================================================
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${process.env.PLAN}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      # ========================================================================
+      # Check Plan Status
+      # ========================================================================
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      # ========================================================================
+      # Terraform Apply
+      # ========================================================================
+      # Only runs on push to dev branch (not on PRs).
+      # Auto-approve is used since this is the dev environment.
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+        run: terraform apply -auto-approve -input=false tfplan
+
+      # ========================================================================
+      # Summary
+      # ========================================================================
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Terraform Dev Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Format | ${{ steps.fmt.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Init | ${{ steps.init.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Validate | ${{ steps.validate.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plan | ${{ steps.plan.outcome }} |" >> $GITHUB_STEP_SUMMARY
