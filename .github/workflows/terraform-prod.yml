@@ -188,21 +188,14 @@ jobs:
       # ========================================================================
       # Save the plan file for the apply job to use.
       # This ensures the exact same plan is applied.
+      # Note: We only upload the plan file, not .terraform directory.
+      # The apply job will run terraform init to restore providers.
       - name: Upload Plan
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-prod
           path: ${{ env.WORKING_DIR }}/tfplan
-          retention-days: 5
-
-      # Also upload the .terraform directory for apply job
-      - name: Upload Terraform Directory
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-dir-prod
-          path: ${{ env.WORKING_DIR }}/.terraform
           retention-days: 5
 
       # ========================================================================
@@ -320,19 +313,33 @@ jobs:
           terraform_wrapper: true
 
       # ========================================================================
-      # Download Artifacts
+      # Cache Terraform Providers (Optional - improves performance)
+      # ========================================================================
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.WORKING_DIR }}/.terraform
+            ~/.terraform.d/plugin-cache
+          key: terraform-prod-${{ hashFiles('envs/prod/.terraform.lock.hcl', 'envs/prod/*.tf') }}
+          restore-keys: |
+            terraform-prod-
+
+      # ========================================================================
+      # Terraform Init
+      # ========================================================================
+      # Re-initialize to restore providers (faster with cache)
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      # ========================================================================
+      # Download Plan Artifact
       # ========================================================================
       - name: Download Plan
         uses: actions/download-artifact@v4
         with:
           name: tfplan-prod
           path: ${{ env.WORKING_DIR }}
-
-      - name: Download Terraform Directory
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-dir-prod
-          path: ${{ env.WORKING_DIR }}/.terraform
 
       # ========================================================================
       # Terraform Apply
